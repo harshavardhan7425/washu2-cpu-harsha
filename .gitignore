@@ -5,3 +5,9 @@
 *.txt
 *.bak
 *.log
+db/
+incremental_db/
+simulation/
+output_files/
+*.rdr
+*.flock
