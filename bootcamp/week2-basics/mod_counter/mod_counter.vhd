@@ -37,4 +37,5 @@ begin
             end if;
         end if;
     end process;
+    count <= count_int;
 end rtl;
