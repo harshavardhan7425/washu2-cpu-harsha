@@ -72,6 +72,8 @@ architecture rtl of washu2_ram is
     -- Current program: Exercise 1, Program A — HALT only.
     -- Replace with your own program for each exercise.
     -- ==============================================================
+    attribute ramstyle : string;
+    attribute ramstyle of ram_mem : signal is "block";
     signal ram_mem : ram_type := (
         -- ================================================================
         -- DEFAULT PROGRAM: self-test for all five Week 7 instructions.
