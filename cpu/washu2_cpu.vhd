@@ -124,17 +124,17 @@ begin
             mem_data_out                        when "0000001",  -- bus_mem
             (others => '0')                     when others;
 
-    alu_proc : process (acc, the_bus, alu_op)
+    alu_proc : process (acc, mbr, alu_op)
     begin
         case alu_op is
             when ALU_ADD =>
                 -- A + B: standard unsigned addition
                 alu_result <= std_logic_vector(
-                    unsigned(acc) + unsigned(the_bus));
+                    unsigned(acc) + unsigned(mbr));
 
             when ALU_AND =>
                 -- A AND B: bitwise
-                alu_result <= acc and the_bus;
+                alu_result <= acc and mbr;
 
             when ALU_NOT =>
                 -- NOT A: bitwise invert (first step of NEGATE)
@@ -149,7 +149,7 @@ begin
 
             when ALU_PASS_B =>
                 -- Pass B through unchanged (used for DLOAD, ILOAD)
-                alu_result <= the_bus;
+                alu_result <= mbr;
 
             when others =>
                 alu_result <= (others => '0');
@@ -314,9 +314,67 @@ begin
                 mem_we     <= '1';
                 next_state <= fetch1;
 
-            when add1 | and1 | indirect1 | indirect2 |
-                iload1 | istore1 | branch1 |
-                brind1 | brind2 | brind3 =>
+            when add1 =>
+                alu_op     <= ALU_ADD;
+                bus_alu    <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when and1 =>
+                alu_op     <= ALU_AND;
+                bus_alu    <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when branch1 =>
+                bus_ir_lower <= '1';    -- target address onto bus
+                case ir_opcode is
+                    when OP_BRANCH => pc_ld <= '1';          -- unconditional
+                    when OP_BRZERO => pc_ld <= zero_flag;
+                    when OP_BRPOS  => pc_ld <= pos_flag;
+                    when OP_BRNEG  => pc_ld <= neg_flag;
+                    when others    => pc_ld <= '0';          -- safety
+                end case;
+                next_state <= fetch1;
+
+            when brind1 =>
+                bus_ir_lower <= '1';
+                mar_ld       <= '1';
+                next_state   <= brind2;
+
+            when brind2 =>
+                bus_mem    <= '1';
+                mbr_ld     <= '1';
+                next_state <= brind3;
+
+            when brind3 =>
+                bus_mbr    <= '1';
+                pc_ld      <= '1';
+                next_state <= fetch1;
+
+            when indirect1 =>
+                bus_mbr    <= '1';
+                mar_ld     <= '1';
+                next_state <= indirect2;
+
+            when indirect2 =>
+                bus_mem    <= '1';
+                mbr_ld     <= '1';
+                case ir_opcode is
+                    when OP_ILOAD  => next_state <= iload1;
+                    when OP_ISTORE => next_state <= istore1;
+                    when others    => next_state <= fetch1;   -- safety
+                end case;
+
+            when iload1 =>
+                bus_mbr    <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when istore1 =>
+                bus_acc    <= '1';
+                mbr_ld     <= '1';
+                mem_we     <= '1';
                 next_state <= fetch1;
 
             when others =>

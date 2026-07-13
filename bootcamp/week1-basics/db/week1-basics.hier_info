@@ -1,8 +1,0 @@
-|mux2_en
-a => y.DATAA
-b => y.DATAB
-sel => y.OUTPUTSELECT
-en => y.OUTPUTSELECT
-y << y.DB_MAX_OUTPUT_PORT_TYPE
-
-
