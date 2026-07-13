@@ -1,0 +1,329 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity washu2_cpu is
+    port(
+        clk: in std_logic;
+        reset: in std_logic;
+        done: out std_logic
+    );
+end washu2_cpu;
+
+architecture rtl of washu2_cpu is 
+
+    type state_type is(
+        resetstate,
+        halt1,
+        fetch1, fetch2, fetch3,
+        neg1, neg2,
+        direct1, direct2,
+        cload1,
+        and1, add1,
+        indirect1, indirect2,
+        store1, load1,
+        iload1, istore1,
+        branch1,
+        brind1, brind2, brind3
+    );
+    signal current_state: state_type := resetstate;
+    signal next_state: state_type;
+
+    -- Clocked Registers
+    signal acc : std_logic_vector(15 downto 0) := (others => '0');
+    signal pc  : std_logic_vector(15 downto 0) := (others => '0');
+    signal mar : std_logic_vector(15 downto 0) := (others => '0');
+    signal mbr : std_logic_vector(15 downto 0) := (others => '0');
+    signal ir  : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- Combinational Registers
+    signal the_bus      : std_logic_vector(15 downto 0);
+    signal alu_result   : std_logic_vector(15 downto 0);
+    signal mem_data_out : std_logic_vector(15 downto 0);
+    signal ir_opcode    : std_logic_vector(3 downto 0);
+    signal ir_addr      : std_logic_vector(11 downto 0);
+    signal ir_addr_se   : std_logic_vector(15 downto 0);
+
+    -- Bus driving control signals
+    signal bus_pc       : std_logic;
+    signal bus_mbr      : std_logic;
+    signal bus_acc      : std_logic;
+    signal bus_ir_lower : std_logic;
+    signal bus_ir_se    : std_logic;
+    signal bus_alu      : std_logic;
+    signal bus_mem      : std_logic;
+
+    -- Bus latching control signals
+    signal mar_ld   : std_logic;
+    signal mbr_ld   : std_logic;
+    signal ir_ld    : std_logic;
+    signal acc_ld   : std_logic;
+    signal pc_ld    : std_logic;
+    signal pc_inc   : std_logic;
+    signal mem_we   : std_logic;
+    signal alu_op   : std_logic_vector(2 downto 0);
+    signal done_int : std_logic;
+
+    -- Conditional flags
+    signal zero_flag : std_logic;
+    signal pos_flag  : std_logic;
+    signal neg_flag  : std_logic;
+
+    -- Op codes
+    constant OP_HALT   : std_logic_vector(3 downto 0) := "0000";
+    constant OP_NEGATE : std_logic_vector(3 downto 0) := "0001";
+    constant OP_CLOAD  : std_logic_vector(3 downto 0) := "0010";
+    constant OP_DLOAD  : std_logic_vector(3 downto 0) := "0011";
+    constant OP_DSTORE : std_logic_vector(3 downto 0) := "0100";
+    constant OP_ILOAD  : std_logic_vector(3 downto 0) := "0101";
+    constant OP_ISTORE : std_logic_vector(3 downto 0) := "0110";
+    constant OP_ADD    : std_logic_vector(3 downto 0) := "0111";
+    constant OP_AND    : std_logic_vector(3 downto 0) := "1000";
+    constant OP_BRANCH : std_logic_vector(3 downto 0) := "1001";
+    constant OP_BRZERO : std_logic_vector(3 downto 0) := "1010";
+    constant OP_BRPOS  : std_logic_vector(3 downto 0) := "1011";
+    constant OP_BRNEG  : std_logic_vector(3 downto 0) := "1100";
+    constant OP_BRIND  : std_logic_vector(3 downto 0) := "1101";
+
+    constant ALU_ADD    : std_logic_vector(2 downto 0) := "000";
+    constant ALU_AND    : std_logic_vector(2 downto 0) := "001";
+    constant ALU_NOT    : std_logic_vector(2 downto 0) := "010";
+    constant ALU_INC    : std_logic_vector(2 downto 0) := "011";
+    constant ALU_PASS_B : std_logic_vector(2 downto 0) := "100";
+
+begin
+
+    ram_inst: entity work.washu2_ram
+        port map(
+            clk      => clk,
+            we       => mem_we,
+            addr     => mar(11 downto 0),
+            data_in  => the_bus,
+            data_out => mem_data_out
+        );
+    
+    ir_opcode <= ir(15 downto 12);
+    ir_addr   <= ir(11 downto 0);
+
+    ir_addr_se <= (15 downto 12 => ir(11)) & ir(11 downto 0);
+
+    with std_logic_vector'(bus_pc       &
+                           bus_mbr      &
+                           bus_acc      &
+                           bus_ir_lower &
+                           bus_ir_se    &
+                           bus_alu      &
+                           bus_mem) select
+        the_bus <=
+            pc                                  when "1000000",  -- bus_pc
+            mbr                                 when "0100000",  -- bus_mbr
+            acc                                 when "0010000",  -- bus_acc
+            (15 downto 12 => '0') & ir_addr     when "0001000",  -- bus_ir_lower
+            ir_addr_se                          when "0000100",  -- bus_ir_se
+            alu_result                          when "0000010",  -- bus_alu
+            mem_data_out                        when "0000001",  -- bus_mem
+            (others => '0')                     when others;
+
+    alu_proc : process (acc, the_bus, alu_op)
+    begin
+        case alu_op is
+            when ALU_ADD =>
+                -- A + B: standard unsigned addition
+                alu_result <= std_logic_vector(
+                    unsigned(acc) + unsigned(the_bus));
+
+            when ALU_AND =>
+                -- A AND B: bitwise
+                alu_result <= acc and the_bus;
+
+            when ALU_NOT =>
+                -- NOT A: bitwise invert (first step of NEGATE)
+                -- B is ignored
+                alu_result <= not acc;
+
+            when ALU_INC =>
+                -- A + 1: second step of NEGATE
+                -- B is ignored
+                alu_result <= std_logic_vector(
+                    unsigned(acc) + to_unsigned(1, 16));
+
+            when ALU_PASS_B =>
+                -- Pass B through unchanged (used for DLOAD, ILOAD)
+                alu_result <= the_bus;
+
+            when others =>
+                alu_result <= (others => '0');
+        end case;
+    end process alu_proc;
+
+    zero_flag <= '1' when acc = x"0000"                          else '0';
+    pos_flag  <= '1' when acc(15) = '0' and acc /= x"0000"      else '0';
+    neg_flag  <= acc(15);
+
+    reg_proc : process (clk)
+    begin
+        if rising_edge(clk) then
+            if reset = '1' then
+                -- Synchronous reset: return everything to initial state
+                current_state <= resetState;
+                acc <= (others => '0');
+                pc  <= (others => '0');
+                mar <= (others => '0');
+                mbr <= (others => '0');
+                ir  <= (others => '0');
+            else
+                -- 1. FSM state update
+                current_state <= next_state;
+
+                -- 2. MAR: latches from bus when mar_ld='1'
+                if mar_ld = '1' then
+                    mar <= the_bus;
+                end if;
+
+                -- 3. MBR: latches from bus when mbr_ld='1'
+                if mbr_ld = '1' then
+                    mbr <= the_bus;
+                end if;
+
+                -- 4. IR: latches from bus when ir_ld='1'
+                if ir_ld = '1' then
+                    ir <= the_bus;
+                end if;
+
+                -- 5. ACC: latches from bus when acc_ld='1'
+                if acc_ld = '1' then
+                    acc <= the_bus;
+                end if;
+
+                -- 6. PC: two sources — bus (for branches) or incrementer
+                if pc_ld = '1' then
+                    pc <= the_bus;
+                elsif pc_inc = '1' then
+                    pc <= std_logic_vector(unsigned(pc) + 1);
+                end if;
+            end if;
+        end if;
+    end process reg_proc;
+
+    fsm_proc : process (current_state, ir_opcode, mbr, zero_flag, pos_flag, neg_flag)
+    begin
+        next_state    <= current_state;
+        bus_pc        <= '0';
+        bus_mbr       <= '0';
+        bus_acc       <= '0';
+        bus_ir_lower  <= '0';
+        bus_ir_se     <= '0';
+        bus_alu       <= '0';
+        bus_mem       <= '0';
+        mar_ld        <= '0';
+        mbr_ld        <= '0';
+        ir_ld         <= '0';
+        acc_ld        <= '0';
+        pc_ld         <= '0';
+        pc_inc        <= '0';
+        mem_we        <= '0';
+        alu_op        <= ALU_PASS_B;
+        done_int      <= '0';
+
+        case current_state is
+
+            when resetState =>
+                next_state <= fetch1;
+
+            when fetch1 =>
+                bus_pc     <= '1';
+                mar_ld     <= '1';
+                next_state <= fetch2;
+
+            when fetch2 =>
+                bus_mem    <= '1';
+                mbr_ld     <= '1';
+                pc_inc     <= '1';
+                next_state <= fetch3;
+
+            when fetch3 =>
+                bus_mbr    <= '1';
+                ir_ld      <= '1';
+
+                case mbr(15 downto 12) is
+                    when OP_HALT   => next_state <= halt1;
+                    when OP_NEGATE => next_state <= neg1;
+                    when OP_CLOAD  => next_state <= cload1;
+                    when OP_DLOAD  => next_state <= direct1;
+                    when OP_DSTORE => next_state <= direct1;
+                    when OP_ILOAD  => next_state <= direct1;
+                    when OP_ISTORE => next_state <= direct1;
+                    when OP_ADD    => next_state <= direct1;
+                    when OP_AND    => next_state <= direct1;
+                    when OP_BRANCH => next_state <= branch1;
+                    when OP_BRZERO => next_state <= branch1;
+                    when OP_BRPOS  => next_state <= branch1;
+                    when OP_BRNEG  => next_state <= branch1;
+                    when OP_BRIND  => next_state <= brind1;
+                    when others    => next_state <= halt1;
+                end case;
+
+            when halt1 =>
+                done_int   <= '1';
+                next_state <= halt1;
+
+            when neg1 =>
+                alu_op     <= ALU_NOT;
+                bus_alu    <= '1';
+                acc_ld     <= '1';
+                next_state <= neg2;
+
+            when neg2 =>
+                alu_op     <= ALU_INC;
+                bus_alu    <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when cload1 =>
+                bus_ir_se  <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when direct1 =>
+                bus_ir_lower <= '1';
+                mar_ld       <= '1';
+                next_state   <= direct2;
+
+            when direct2 =>
+                bus_mem    <= '1';
+                mbr_ld     <= '1';
+
+                case ir_opcode is
+                    when OP_DLOAD  => next_state <= load1;
+                    when OP_DSTORE => next_state <= store1;
+                    when OP_ADD    => next_state <= add1;
+                    when OP_AND    => next_state <= and1;
+                    when OP_ILOAD  => next_state <= indirect1;
+                    when OP_ISTORE => next_state <= indirect1;
+                    when others    => next_state <= fetch1;
+                end case;
+
+            when load1 =>
+                bus_mbr    <= '1';
+                acc_ld     <= '1';
+                next_state <= fetch1;
+
+            when store1 =>
+                bus_acc    <= '1';
+                mbr_ld     <= '1';
+                mem_we     <= '1';
+                next_state <= fetch1;
+
+            when add1 | and1 | indirect1 | indirect2 |
+                iload1 | istore1 | branch1 |
+                brind1 | brind2 | brind3 =>
+                next_state <= fetch1;
+
+            when others =>
+                next_state <= fetch1;
+
+        end case;
+    end process fsm_proc;
+
+    done <= done_int;
+end rtl;
