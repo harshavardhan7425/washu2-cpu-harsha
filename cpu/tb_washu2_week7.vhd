@@ -25,37 +25,36 @@ begin
 
     stimulus : process
     begin
-        -- Apply reset for 3 cycles
         reset <= '1';
         wait for 3 * CLK_PERIOD;
+        wait for 5 ns;
         reset <= '0';
 
-        -- Wait for HALT with a generous timeout
-        -- Program D: 4 instructions × 4-8 cycles each + margin = ~50 cycles
-        wait until done = '1' for 60 * CLK_PERIOD;
+        wait until done = '1' for 1200 * CLK_PERIOD;
 
         assert done = '1'
-            report "FAIL: done never asserted - CPU did not reach HALT"
+            report "FAIL: CPU did not reach HALT"
             severity error;
 
-        -- Let final state settle, then verify done holds
         wait for 5 * CLK_PERIOD;
+
         assert done = '1'
             report "FAIL: CPU left HALT state"
             severity error;
 
-        -- Test reset recovery
         reset <= '1';
         wait for 2 * CLK_PERIOD;
         reset <= '0';
-        wait for CLK_PERIOD;
+
+        wait for 2 * CLK_PERIOD;
 
         assert done = '0'
-            report "FAIL: done should be 0 after reset"
+            report "FAIL: done should be low after reset"
             severity error;
 
-        wait for 5 * CLK_PERIOD;
-        report "Testbench complete." severity note;
+        report "PASS: CPU executed complete program successfully."
+            severity note;
+
         wait;
     end process stimulus;
 

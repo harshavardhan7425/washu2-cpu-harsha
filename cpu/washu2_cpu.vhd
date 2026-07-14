@@ -40,6 +40,7 @@ architecture rtl of washu2_cpu is
     signal the_bus      : std_logic_vector(15 downto 0);
     signal alu_result   : std_logic_vector(15 downto 0);
     signal mem_data_out : std_logic_vector(15 downto 0);
+    signal ram_addr     : std_logic_vector(11 downto 0);
     signal ir_opcode    : std_logic_vector(3 downto 0);
     signal ir_addr      : std_logic_vector(11 downto 0);
     signal ir_addr_se   : std_logic_vector(15 downto 0);
@@ -90,18 +91,19 @@ architecture rtl of washu2_cpu is
     constant ALU_NOT    : std_logic_vector(2 downto 0) := "010";
     constant ALU_INC    : std_logic_vector(2 downto 0) := "011";
     constant ALU_PASS_B : std_logic_vector(2 downto 0) := "100";
-
 begin
+    ram_addr <= the_bus(11 downto 0) when mar_ld = '1' else mar(11 downto 0);
 
-    ram_inst: entity work.washu2_ram
-        port map(
+    ram_inst : entity work.washu2_ram
+        port map (
             clk      => clk,
             we       => mem_we,
-            addr     => mar(11 downto 0),
+            addr     => ram_addr,
             data_in  => the_bus,
             data_out => mem_data_out
         );
-    
+
+
     ir_opcode <= ir(15 downto 12);
     ir_addr   <= ir(11 downto 0);
 
