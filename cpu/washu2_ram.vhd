@@ -43,13 +43,11 @@ architecture rtl of washu2_ram is
         -- ================================================================
 
         -- ── Instructions (addresses 0x000–0x005) ──────────────────────
-        0  => x"202A",   -- CLOAD 42
-        1  => x"4010",   -- DSTORE 0x010
-        2  => x"2000",   -- CLOAD 0
-        3  => x"3010",   -- DLOAD 0x010
-        4  => x"0000",   -- HALT
+    0  => x"200A",   -- CLOAD 10      ACC ← 10
+    1  => x"7020",   -- ADD 0x020     ACC ← 10 + 5 = 15
+    2  => x"0000",   -- HALT
 
-        16 => x"0000",   -- Data at address 0x010 (will become 0x002A after DSTORE)
+    32 => x"0005",   -- Data = 5
 
         others => x"0000"
     );
